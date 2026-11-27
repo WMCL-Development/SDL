@@ -30,6 +30,7 @@
 #include "../video/SDL_video_c.h"
 
 #ifdef SDL_PLATFORM_ANDROID
+#include <android/log.h>
 #include "../core/android/SDL_android.h"
 #include "../video/android/SDL_androidevents.h"
 #endif
@@ -1280,12 +1281,14 @@ error:
 
 SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *name)
 {
+    /* PCLSDL diagnostic removed */
     SDL_Renderer *renderer;
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetPointerProperty(props, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
     SDL_SetStringProperty(props, SDL_PROP_RENDERER_CREATE_NAME_STRING, name);
     renderer = SDL_CreateRendererWithProperties(props);
     SDL_DestroyProperties(props);
+    /* PCLSDL diagnostic removed */
     return renderer;
 }
 
@@ -1318,6 +1321,7 @@ SDL_GPUDevice *SDL_GetGPURendererDevice(SDL_Renderer *renderer)
 SDL_Renderer *SDL_CreateSoftwareRenderer(SDL_Surface *surface)
 {
 #ifdef SDL_VIDEO_RENDER_SW
+    /* PCLSDL diagnostic removed */
     SDL_Renderer *renderer;
 
     CHECK_PARAM(!surface) {

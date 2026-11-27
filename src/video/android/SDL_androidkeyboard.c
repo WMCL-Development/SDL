@@ -27,6 +27,8 @@
 #include "../../events/SDL_events_c.h"
 
 #include "SDL_androidkeyboard.h"
+#include "SDL_androidwindow.h"
+#include "../../events/SDL_keyboard_c.h"
 
 #include "../../core/android/SDL_android.h"
 
@@ -368,11 +370,17 @@ static SDL_Scancode TranslateKeycode(int keycode)
 
 void Android_OnKeyDown(int keycode)
 {
+    if (Android_Window) {
+        SDL_SetKeyboardFocus(Android_Window);
+    }
     SDL_SendKeyboardKey(0, SDL_DEFAULT_KEYBOARD_ID, keycode, TranslateKeycode(keycode), true);
 }
 
 void Android_OnKeyUp(int keycode)
 {
+    if (Android_Window) {
+        SDL_SetKeyboardFocus(Android_Window);
+    }
     SDL_SendKeyboardKey(0, SDL_DEFAULT_KEYBOARD_ID, keycode, TranslateKeycode(keycode), false);
 }
 

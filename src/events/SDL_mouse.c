@@ -624,7 +624,13 @@ bool SDL_MousePositionInWindow(SDL_Window *window, float x, float y)
 static bool SDL_UpdateMouseFocus(SDL_Window *window, float x, float y, Uint32 buttonstate, bool send_mouse_motion)
 {
     SDL_Mouse *mouse = SDL_GetMouse();
+#ifdef __ANDROID__
+    // Android has a single SDL window; the injected Surface can report
+    // coordinates outside its nominal bounds and would otherwise clear focus.
+    bool inWindow = true;
+#else
     bool inWindow = SDL_MousePositionInWindow(window, x, y);
+#endif
 
     if (!inWindow) {
         if (window == mouse->focus) {
@@ -832,7 +838,7 @@ static void SDL_PrivateSendMouseMotion(Uint64 timestamp, SDL_Window *window, SDL
         SDL_Event event;
         event.type = SDL_EVENT_MOUSE_MOTION;
         event.common.timestamp = timestamp;
-        event.motion.windowID = mouse->focus ? mouse->focus->id : 0;
+        event.motion.windowID = mouse->focus ? mouse->focus->id : (window ? window->id : 0);
         event.motion.which = mouseID;
         // Set us pending (or clear during a normal mouse movement event) as having triggered
         mouse->was_touch_mouse_events = (mouseID == SDL_TOUCH_MOUSEID);
@@ -999,7 +1005,7 @@ static void SDL_PrivateSendMouseButton(Uint64 timestamp, SDL_Window *window, SDL
         SDL_Event event;
         event.type = type;
         event.common.timestamp = timestamp;
-        event.button.windowID = mouse->focus ? mouse->focus->id : 0;
+        event.button.windowID = mouse->focus ? mouse->focus->id : (window ? window->id : 0);
         event.button.which = mouseID;
         event.button.down = down;
         event.button.button = button;
@@ -1055,7 +1061,7 @@ void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseI
         SDL_Event event;
         event.type = SDL_EVENT_MOUSE_WHEEL;
         event.common.timestamp = timestamp;
-        event.wheel.windowID = mouse->focus ? mouse->focus->id : 0;
+        event.wheel.windowID = mouse->focus ? mouse->focus->id : (window ? window->id : 0);
         event.wheel.which = mouseID;
         event.wheel.direction = direction;
         event.wheel.mouse_x = mouse->x;

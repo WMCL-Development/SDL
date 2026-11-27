@@ -68,6 +68,7 @@ extern bool Android_JNI_GetAccelerometerValues(float values[3]);
 extern void Android_JNI_ShowScreenKeyboard(int input_type, SDL_Rect *inputRect);
 extern void Android_JNI_HideScreenKeyboard(void);
 extern ANativeWindow *Android_JNI_GetNativeWindow(void);
+extern __attribute__((visibility("default"))) void PCLSDL_SetAndroidNativeWindow(ANativeWindow *window);
 
 extern SDL_DisplayOrientation Android_JNI_GetDisplayNaturalOrientation(void);
 extern SDL_DisplayOrientation Android_JNI_GetDisplayCurrentOrientation(void);

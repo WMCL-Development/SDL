@@ -19,6 +19,9 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 #include "SDL_internal.h"
+#ifdef SDL_PLATFORM_ANDROID
+#include <android/log.h>
+#endif
 #include "SDL3/SDL_revision.h"
 
 #if defined(SDL_PLATFORM_WINDOWS)
@@ -292,6 +295,9 @@ bool SDL_IsVideoThread(void)
 void SDL_InitMainThread(void)
 {
     static bool done_info = false;
+#ifdef SDL_PLATFORM_ANDROID
+    /* PCLSDL diagnostic removed */
+#endif
 
     // If we haven't done it by now, mark this as the main thread
     if (SDL_MainThreadID == 0) {
@@ -316,6 +322,9 @@ void SDL_InitMainThread(void)
 
         done_info = true;
     }
+#ifdef SDL_PLATFORM_ANDROID
+    /* PCLSDL diagnostic removed */
+#endif
 }
 
 static void SDL_QuitMainThread(void)
@@ -326,12 +335,24 @@ static void SDL_QuitMainThread(void)
     SDL_QuitTLSData();
 }
 
+#ifdef SDL_PLATFORM_ANDROID
+#include <android/log.h>
+extern void PCL_AndroidNotifySdlInit(void);
+#endif
+
 bool SDL_InitSubSystem(SDL_InitFlags flags)
 {
     Uint32 flags_initialized = 0;
 
+#ifdef SDL_PLATFORM_ANDROID
+    /* PCLSDL diagnostic removed */
+    PCL_AndroidNotifySdlInit();
+    /* PCLSDL diagnostic removed */
+#endif
+
     if (!SDL_MainIsReady) {
-        return SDL_SetError("Application didn't initialize properly, did you include SDL_main.h in the file containing your main() function?");
+        // PCL Android: the JVM owns the process entry point; SDL_main is not used.
+        SDL_SetMainReady();
     }
 
 #ifdef SDL_PLATFORM_EMSCRIPTEN

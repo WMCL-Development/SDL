@@ -20,6 +20,10 @@
 */
 #include "SDL_internal.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #ifdef SDL_VIDEO_DRIVER_ANDROID
 
 #include "../SDL_sysvideo.h"
@@ -58,6 +62,9 @@ bool Android_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Proper
     window->y = 0;
     window->w = Android_SurfaceWidth;
     window->h = Android_SurfaceHeight;
+    window->windowed.w = window->w;
+    window->windowed.h = window->h;
+    /* PCLSDL diagnostic removed */
 
     // One window, it always has focus
     SDL_SetMouseFocus(window);

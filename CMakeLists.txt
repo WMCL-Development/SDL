@@ -4388,5 +4388,14 @@ endif()
 ##### Fix Objective C builds #####
 string(APPEND CMAKE_OBJC_FLAGS " ${CMAKE_C_FLAGS}")
 
+# PCL 26.3 SDL integration hook (Android only)
+if(ANDROID)
+  add_library(pcl_sdl_hook SHARED /root/workspace/pcl-sdlhook/pcl_sdl_hook.c)
+  target_include_directories(pcl_sdl_hook PRIVATE
+    /root/workspace/bytehook/prefab/modules/bytehook/include)
+  target_link_libraries(pcl_sdl_hook PRIVATE
+    /root/workspace/bytehook/prefab/modules/bytehook/libs/android.arm64-v8a/libbytehook.so)
+endif()
+
 SDL_PrintSummary()
 debug_show_sdl_deps()

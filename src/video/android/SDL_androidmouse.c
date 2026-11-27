@@ -21,11 +21,16 @@
 
 #include "SDL_internal.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 #ifdef SDL_VIDEO_DRIVER_ANDROID
 
 #include "SDL_androidmouse.h"
 
 #include "../../events/SDL_mouse_c.h"
+#include "../../events/SDL_keyboard_c.h"
 
 #include "../../core/android/SDL_android.h"
 
@@ -212,13 +217,20 @@ void Android_OnMouse(SDL_Window *window, int state, int action, float x, float y
     int changes;
     Uint8 button;
 
+    /* PCLSDL diagnostic removed */
     if (!window) {
         return;
     }
 
+    SDL_SetKeyboardFocus(window);
+    SDL_SetMouseFocus(window);
+
     switch (action) {
     case ACTION_DOWN:
-        changes = state & ~last_state;
+        // Re-assert the full button state on every press. A previous synthetic
+        // touch-up can leave last_state stale and make the next press a no-op.
+        last_state = 0;
+        changes = state;
         button = TranslateButton(changes);
         last_state = state;
         SDL_SendMouseMotion(0, window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
@@ -226,11 +238,21 @@ void Android_OnMouse(SDL_Window *window, int state, int action, float x, float y
         break;
 
     case ACTION_UP:
-        changes = last_state & ~state;
-        button = TranslateButton(changes);
+        // Release every button that was held before this event. Relying only
+        // on the state diff can miss the left button when another synthetic
+        // touch event already cleared last_state.
+        changes = last_state;
         last_state = state;
         SDL_SendMouseMotion(0, window, SDL_DEFAULT_MOUSE_ID, relative, x, y);
-        SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, button, false);
+        // Always clear the left button on an up event. Minecraft ignores the
+        // next press if its activeButton was never released.
+        SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, SDL_BUTTON_LEFT, false);
+        if (changes & BUTTON_SECONDARY) {
+            SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, SDL_BUTTON_RIGHT, false);
+        }
+        if (changes & BUTTON_TERTIARY) {
+            SDL_SendMouseButton(0, window, SDL_DEFAULT_MOUSE_ID, SDL_BUTTON_MIDDLE, false);
+        }
         break;
 
     case ACTION_MOVE:

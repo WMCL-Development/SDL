@@ -19,6 +19,9 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 #include "SDL_internal.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 
 #ifdef SDL_VIDEO_DRIVER_ANDROID
 
@@ -162,6 +165,9 @@ VideoBootStrap Android_bootstrap = {
 
 bool Android_VideoInit(SDL_VideoDevice *_this)
 {
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+#endif
     SDL_VideoData *videodata = _this->internal;
     SDL_DisplayID displayID;
     SDL_VideoDisplay *display;
@@ -176,20 +182,27 @@ bool Android_VideoInit(SDL_VideoDevice *_this)
     mode.h = Android_DeviceHeight;
     mode.refresh_rate = Android_ScreenRate;
 
+    /* PCLSDL diagnostic removed */
     displayID = SDL_AddBasicVideoDisplay(&mode);
+    /* PCLSDL diagnostic removed */
     if (displayID == 0) {
         return false;
     }
     display = SDL_GetVideoDisplay(displayID);
+    /* PCLSDL diagnostic removed */
     display->natural_orientation = Android_JNI_GetDisplayNaturalOrientation();
+    /* PCLSDL diagnostic removed */
     display->current_orientation = Android_JNI_GetDisplayCurrentOrientation();
     display->content_scale = Android_ScreenDensity;
-
+    /* PCLSDL diagnostic removed */
     Android_InitTouch();
-
+    /* PCLSDL diagnostic removed */
     Android_InitMouse();
 
     // We're done!
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+#endif
     return true;
 }
 

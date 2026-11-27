@@ -21,6 +21,10 @@
 
 #include "SDL_internal.h"
 
+#ifdef SDL_PLATFORM_ANDROID
+#include <android/log.h>
+#endif
+
 // The high-level video driver subsystem
 
 #include "SDL_sysvideo.h"
@@ -616,6 +620,9 @@ const char *SDL_GetVideoDriver(int index)
  */
 bool SDL_VideoInit(const char *driver_name)
 {
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+#endif
     SDL_VideoDevice *video;
     bool init_events = false;
     bool init_keyboard = false;
@@ -652,6 +659,10 @@ bool SDL_VideoInit(const char *driver_name)
         goto pre_driver_error;
     }
     init_pen = true;
+
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+#endif
 
     // Select the proper video driver
     video = NULL;
@@ -2389,6 +2400,9 @@ static SDL_WindowFlags SDL_GetWindowFlagProperties(SDL_PropertiesID props)
 
 SDL_Window *SDL_CreateWindowWithProperties(SDL_PropertiesID props)
 {
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+#endif
     SDL_Window *window;
     const char *title = SDL_GetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, NULL);
     int x = (int)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_UNDEFINED);
@@ -2613,8 +2627,40 @@ SDL_Window *SDL_CreateWindowWithProperties(SDL_PropertiesID props)
     return window;
 }
 
+#ifdef __ANDROID__
+static SDL_Window *pcl_primary_window;
+static int pcl_primary_extra_refs;
+
+SDL_Window *PCL_GetFallbackWindow(void)
+{
+    if (pcl_primary_window) {
+        return pcl_primary_window;
+    }
+    return _this ? _this->windows : NULL;
+}
+#endif
+
 SDL_Window *SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags flags)
 {
+#ifdef __ANDROID__
+    if (pcl_primary_window) {
+        ++pcl_primary_extra_refs;
+        SDL_Log("PCL SDL reuse primary window %p refs=%d",
+            (void *)pcl_primary_window, pcl_primary_extra_refs);
+        return pcl_primary_window;
+    }
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#endif
+#ifdef __ANDROID__
+    {
+        SDL_DisplayID display = SDL_GetPrimaryDisplay();
+        const SDL_DisplayMode *mode = display ? SDL_GetCurrentDisplayMode(display) : NULL;
+        if (mode && mode->w > 0 && mode->h > 0) {
+            w = mode->w;
+            h = mode->h;
+        }
+    }
+#endif
     SDL_Window *window;
     SDL_PropertiesID props = SDL_CreateProperties();
     if (title && *title) {
@@ -2625,6 +2671,10 @@ SDL_Window *SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags fl
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, flags);
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+    if (window) pcl_primary_window = window;
+#endif
     return window;
 }
 
@@ -2901,6 +2951,13 @@ SDL_Window *SDL_GetWindowFromID(SDL_WindowID id)
             }
         }
     }
+#ifdef __ANDROID__
+    // The injected Android Surface can make SDL lose the window ID for mouse
+    // events. Fall back to the single primary window (same workaround as FCL).
+    if (pcl_primary_window) {
+        return pcl_primary_window;
+    }
+#endif
     SDL_SetError("Invalid window ID");
     return NULL;
 }
@@ -4517,6 +4574,22 @@ void SDL_RemoveWindowRenderer(SDL_Window *window, SDL_Renderer *renderer)
 
 void SDL_DestroyWindow(SDL_Window *window)
 {
+#ifdef __ANDROID__
+    if (window && window == pcl_primary_window) {
+        // The first window is reused by later SDL_CreateWindow calls. Each reuse
+        // owns one extra reference; only destroy the real window when all of
+        // them have been released. This keeps the startup tool window alive but
+        // lets Minecraft's final End Game destroy actually finish the loop.
+        if (pcl_primary_extra_refs > 0) {
+            --pcl_primary_extra_refs;
+            SDL_Log("PCL SDL release primary window %p refs=%d",
+                (void *)window, pcl_primary_extra_refs);
+            return;
+        }
+        SDL_Log("PCL SDL destroy primary window %p", (void *)window);
+        pcl_primary_window = NULL;
+    }
+#endif
     CHECK_WINDOW_MAGIC(window,);
 
     window->is_destroying = true;

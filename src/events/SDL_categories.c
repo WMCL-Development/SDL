@@ -25,6 +25,11 @@
 #include "SDL_events_c.h"
 #include "SDL_categories_c.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+extern SDL_Window *PCL_GetFallbackWindow(void);
+#endif
+
 SDL_EventCategory SDL_GetEventCategory(Uint32 type)
 {
     if (type >= SDL_EVENT_USER && type <= SDL_EVENT_LAST) {
@@ -253,5 +258,12 @@ SDL_Window *SDL_GetWindowFromEvent(const SDL_Event *event)
         // else -> event has no associated window (not an error)
         return NULL;
     }
-    return SDL_GetWindowFromID(windowID);
+    {
+        SDL_Window *window = SDL_GetWindowFromID(windowID);
+#ifdef __ANDROID__
+        window = PCL_GetFallbackWindow();
+        /* PCLSDL diagnostic removed */
+#endif
+        return window;
+    }
 }

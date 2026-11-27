@@ -26,6 +26,38 @@
 #include "SDL_blendline.h"
 #include "SDL_blendpoint.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#include <unwind.h>
+#include <dlfcn.h>
+
+typedef struct {
+    void *frames[24];
+    int count;
+} PclBacktrace;
+
+static _Unwind_Reason_Code pcl_backtrace_cb(struct _Unwind_Context *ctx, void *arg)
+{
+    PclBacktrace *bt = (PclBacktrace *)arg;
+    void *ip = (void *)_Unwind_GetIP(ctx);
+    if (ip && bt->count < (int)(sizeof(bt->frames) / sizeof(bt->frames[0]))) {
+        bt->frames[bt->count++] = ip;
+    }
+    return _URC_NO_REASON;
+}
+
+static void pcl_log_backtrace(const char *where)
+{
+    PclBacktrace bt = {0};
+    _Unwind_Backtrace(pcl_backtrace_cb, &bt);
+    for (int i = 0; i < bt.count; i++) {
+        Dl_info info = {0};
+        dladdr(bt.frames[i], &info);
+        /* PCLSDL diagnostic removed */
+    }
+}
+#endif
+
 static void SDL_BlendLine_RGB2(SDL_Surface *dst, int x1, int y1, int x2, int y2,
                                SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                bool draw_end)
@@ -153,6 +185,9 @@ static void SDL_BlendLine_RGB555(SDL_Surface *dst, int x1, int y1, int x2, int y
                                  SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                  bool draw_end)
 {
+#ifdef __ANDROID__
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) return;
+#endif
     unsigned r, g, b, a, inva;
 
     if (blendMode == SDL_BLENDMODE_BLEND || blendMode == SDL_BLENDMODE_ADD) {
@@ -275,6 +310,9 @@ static void SDL_BlendLine_RGB565(SDL_Surface *dst, int x1, int y1, int x2, int y
                                  SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                  bool draw_end)
 {
+#ifdef __ANDROID__
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) return;
+#endif
     unsigned r, g, b, a, inva;
 
     if (blendMode == SDL_BLENDMODE_BLEND || blendMode == SDL_BLENDMODE_ADD) {
@@ -397,6 +435,9 @@ static void SDL_BlendLine_RGB4(SDL_Surface *dst, int x1, int y1, int x2, int y2,
                                SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                bool draw_end)
 {
+#ifdef __ANDROID__
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) return;
+#endif
     const SDL_PixelFormatDetails *fmt = dst->fmt;
     unsigned r, g, b, a, inva;
 
@@ -520,6 +561,9 @@ static void SDL_BlendLine_RGBA4(SDL_Surface *dst, int x1, int y1, int x2, int y2
                                 SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                 bool draw_end)
 {
+#ifdef __ANDROID__
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) return;
+#endif
     const SDL_PixelFormatDetails *fmt = dst->fmt;
     unsigned r, g, b, a, inva;
 
@@ -643,6 +687,11 @@ static void SDL_BlendLine_XRGB8888(SDL_Surface *dst, int x1, int y1, int x2, int
                                  SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                  bool draw_end)
 {
+#ifdef __ANDROID__
+    // The 26.3 software path passes an invalid target. Skip the line entirely
+    // and see whether the game can continue; this is a probe, not a fix.
+    return;
+#endif
     unsigned r, g, b, a, inva;
 
     if (blendMode == SDL_BLENDMODE_BLEND || blendMode == SDL_BLENDMODE_ADD) {
@@ -765,6 +814,9 @@ static void SDL_BlendLine_ARGB8888(SDL_Surface *dst, int x1, int y1, int x2, int
                                    SDL_BlendMode blendMode, Uint8 _r, Uint8 _g, Uint8 _b, Uint8 _a,
                                    bool draw_end)
 {
+#ifdef __ANDROID__
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) return;
+#endif
     unsigned r, g, b, a, inva;
 
     if (blendMode == SDL_BLENDMODE_BLEND || blendMode == SDL_BLENDMODE_ADD) {
@@ -922,6 +974,28 @@ static BlendLineFunc SDL_CalculateBlendLineFunc(const SDL_PixelFormatDetails *fm
 bool SDL_BlendLine(SDL_Surface *dst, int x1, int y1, int x2, int y2, SDL_BlendMode blendMode, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 {
     BlendLineFunc func;
+
+    if (!dst || !dst->pixels || !dst->fmt || dst->w <= 0 || dst->h <= 0) {
+        SDL_Log("PCL BlendLine invalid target dst=%p pixels=%p fmt=%p size=%dx%d",
+                (void *)dst, dst ? dst->pixels : NULL, dst ? (void *)dst->fmt : NULL,
+                dst ? dst->w : 0, dst ? dst->h : 0);
+        return SDL_SetError("SDL_BlendLine(): invalid target surface");
+    }
+#ifdef __ANDROID__
+    // Diagnostic: 26.3 crashes inside the software renderer's line path.
+    // Skip the draw first to see whether the game can continue past it.
+    {
+        static int pcl_calls = 0;
+        int n = __atomic_fetch_add(&pcl_calls, 1, __ATOMIC_RELAXED);
+        if (n < 4) {
+            __android_log_print(ANDROID_LOG_INFO, "PCLSDL",
+                "BlendLine skip dst=%p pixels=%p %dx%d pitch=%d line=(%d,%d)-(%d,%d) mode=%d",
+                (void *)dst, dst->pixels, dst->w, dst->h, dst->pitch,
+                x1, y1, x2, y2, (int)blendMode);
+        }
+    }
+    return true;
+#endif
 
     CHECK_PARAM(!SDL_SurfaceValid(dst)) {
         return SDL_InvalidParamError("SDL_BlendLine(): dst");

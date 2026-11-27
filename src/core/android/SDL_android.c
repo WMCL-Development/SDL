@@ -363,6 +363,7 @@ static void checkJNIReady(void);
 static pthread_key_t mThreadKey;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static JavaVM *mJavaVM = NULL;
+static JavaVM *PCL_ART_JAVA_VM = NULL;
 
 // Main activity
 static jclass mActivityClass;
@@ -578,6 +579,25 @@ static void register_methods(JNIEnv *env, const char *classname, JNINativeMethod
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved)
 {
     JNIEnv *env = NULL;
+
+    // The launcher ART Activity loads SDL first and initializes the real Java
+    // bridge. HotSpot may load the same library later; keep the ART VM/classes.
+    if (PCL_ART_JAVA_VM != NULL && PCL_ART_JAVA_VM != vm) {
+        mJavaVM = PCL_ART_JAVA_VM;
+        if ((*mJavaVM)->GetEnv(mJavaVM, (void **)&env, JNI_VERSION_1_4) != JNI_OK) {
+            return JNI_VERSION_1_4;
+        }
+        register_methods(env, "org/libsdl/app/SDLActivity", SDLActivity_tab, SDL_arraysize(SDLActivity_tab));
+        register_methods(env, "org/libsdl/app/SDLInputConnection", SDLInputConnection_tab, SDL_arraysize(SDLInputConnection_tab));
+        register_methods(env, "org/libsdl/app/SDLAudioManager", SDLAudioManager_tab, SDL_arraysize(SDLAudioManager_tab));
+        register_methods(env, "org/libsdl/app/SDLControllerManager", SDLControllerManager_tab, SDL_arraysize(SDLControllerManager_tab));
+        register_methods(env, "org/libsdl/app/HIDDeviceManager", HIDDeviceManager_tab, SDL_arraysize(HIDDeviceManager_tab));
+        return JNI_VERSION_1_4;
+    }
+
+    if (mJavaVM != NULL && mJavaVM != vm) {
+        return JNI_VERSION_1_4;
+    }
 
     mJavaVM = vm;
 
@@ -1267,6 +1287,7 @@ JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativeSurfaceCreated)(JNIEnv *env, j
         SDL_WindowData *data = Android_Window->internal;
 
         data->native_window = Android_JNI_GetNativeWindow();
+        /* PCLSDL diagnostic removed */
         SDL_SetPointerProperty(SDL_GetWindowProperties(Android_Window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, data->native_window);
         if (data->native_window == NULL) {
             SDL_SetError("Could not fetch native window from UI thread");
@@ -1289,6 +1310,7 @@ JNIEXPORT void JNICALL SDL_JAVA_INTERFACE(onNativeSurfaceChanged)(JNIEnv *env, j
         // If the surface has been previously destroyed by onNativeSurfaceDestroyed, recreate it here
         if (data->egl_surface == EGL_NO_SURFACE) {
             data->egl_surface = SDL_EGL_CreateSurface(_this, Android_Window, (NativeWindowType)data->native_window);
+            /* PCLSDL diagnostic removed */
             SDL_SetPointerProperty(SDL_GetWindowProperties(Android_Window), SDL_PROP_WINDOW_ANDROID_SURFACE_POINTER, data->egl_surface);
         }
 
@@ -1702,11 +1724,69 @@ static void LocalReferenceHolder_Cleanup(struct LocalReferenceHolder *refholder)
     }
 }
 
+static ANativeWindow *PCL_ExternalNativeWindow = NULL;
+
+__attribute__((visibility("default"))) void PCLSDL_SetAndroidNativeWindow(ANativeWindow *window)
+{
+    PCL_ExternalNativeWindow = window;
+}
+
+void PCL_AndroidNotifySdlInit(void)
+{
+    JNIEnv *env = NULL;
+    if (PCL_ART_JAVA_VM == NULL) {
+        return;
+    }
+    if ((*PCL_ART_JAVA_VM)->AttachCurrentThread(PCL_ART_JAVA_VM, &env, NULL) != JNI_OK || env == NULL) {
+        return;
+    }
+    jclass cls = (*env)->FindClass(env, "pcl/sdl/PclSdlBridge");
+    if (cls != NULL) {
+        jmethodID mid = (*env)->GetStaticMethodID(env, cls, "onNativeSdlInit", "()V");
+        if (mid != NULL) {
+            (*env)->CallStaticVoidMethod(env, cls, mid);
+        }
+        (*env)->DeleteLocalRef(env, cls);
+    }
+    (*PCL_ART_JAVA_VM)->DetachCurrentThread(PCL_ART_JAVA_VM);
+}
+
+JNIEXPORT void JNICALL Java_pcl_sdl_PclSdlBridge_setArtVm(JNIEnv *env, jclass clazz)
+{
+    (void)clazz;
+    (*env)->GetJavaVM(env, &PCL_ART_JAVA_VM);
+}
+
+__attribute__((used)) JNIEXPORT jboolean JNICALL Java_pcl_sdl_PclSdlBridge_isRelativeMouseMode(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    return SDL_GetRelativeMouseMode() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_pcl_sdl_PclSdlBridge_setNativeWindow(JNIEnv *env, jclass clazz, jlong pointer)
+{
+    (void)env;
+    (void)clazz;
+    PCLSDL_SetAndroidNativeWindow((ANativeWindow *)(intptr_t)pointer);
+}
+
 ANativeWindow *Android_JNI_GetNativeWindow(void)
 {
     ANativeWindow *anw = NULL;
     jobject s;
-    JNIEnv *env = Android_JNI_GetEnv();
+    JNIEnv *env;
+
+    if (PCL_ExternalNativeWindow != NULL) {
+        anw = PCL_ExternalNativeWindow;
+        PCL_ExternalNativeWindow = NULL;
+        return anw;
+    }
+
+    // Always ask the Java SDLSurface for the current surface. A cached
+    // ANativeWindow survives Activity background/resume and becomes a dead
+    // window after the SurfaceView recreates its Surface.
+    env = Android_JNI_GetEnv();
 
     s = (*env)->CallStaticObjectMethod(env, mActivityClass, midGetNativeSurface);
     if (s) {
@@ -2632,6 +2712,10 @@ int Android_JNI_GetPowerInfo(int *plugged, int *charged, int *battery, int *seco
 // Add all touch devices
 void Android_JNI_InitTouch(void)
 {
+    if (mActivityClass == NULL || midInitTouch == NULL) {
+        /* PCLSDL diagnostic removed */
+        return;
+    }
     JNIEnv *env = Android_JNI_GetEnv();
     (*env)->CallStaticVoidMethod(env, mActivityClass, midInitTouch);
 }

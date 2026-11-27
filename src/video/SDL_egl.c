@@ -26,6 +26,7 @@
 #include "../core/windows/SDL_windows.h"
 #endif
 #ifdef SDL_VIDEO_DRIVER_ANDROID
+#include <android/log.h>
 #include <android/native_window.h>
 #include "../video/android/SDL_androidvideo.h"
 #endif
@@ -822,6 +823,10 @@ static bool SDL_EGL_PrivateChooseConfig(SDL_VideoDevice *_this, bool set_config_
 
     attribs[i++] = EGL_RENDERABLE_TYPE;
     if (_this->gl_config.profile_mask == SDL_GL_CONTEXT_PROFILE_ES) {
+#ifdef __ANDROID__
+        // MobileGlues/FPE wrappers in the Android port only accept ES2 here.
+        attribs[i++] = EGL_OPENGL_ES2_BIT;
+#else
 #ifdef EGL_KHR_create_context
         if (_this->gl_config.major_version >= 3 &&
             SDL_EGL_HasExtension(_this, SDL_EGL_DISPLAY_EXTENSION, "EGL_KHR_create_context")) {
@@ -833,6 +838,7 @@ static bool SDL_EGL_PrivateChooseConfig(SDL_VideoDevice *_this, bool set_config_
         } else {
             attribs[i++] = EGL_OPENGL_ES_BIT;
         }
+#endif
         _this->egl_data->eglBindAPI(EGL_OPENGL_ES_API);
     } else {
         attribs[i++] = EGL_OPENGL_BIT;
@@ -985,6 +991,13 @@ SDL_GLContext SDL_EGL_CreateContext(SDL_VideoDevice *_this, EGLSurface egl_surfa
     EGLint minor_version = _this->gl_config.minor_version;
     bool profile_es = (profile_mask == SDL_GL_CONTEXT_PROFILE_ES);
 
+#ifdef __ANDROID__
+    /* PCLSDL diagnostic removed */
+    // Let MobileGlues receive the context profile the game asked for instead
+    // of forcing the Android ES profile over it.
+    _this->gl_config.flags &= ~SDL_GL_CONTEXT_DEBUG_FLAG;
+#endif
+
     if (!_this->egl_data) {
         SDL_SetError("EGL not initialized");
         return NULL;
@@ -1013,6 +1026,14 @@ SDL_GLContext SDL_EGL_CreateContext(SDL_VideoDevice *_this, EGLSurface egl_surfa
 #endif
 
     // Set the context version and other attributes.
+#ifdef __ANDROID__
+    // Minecraft installs an EGL context-attrib callback that already provides
+    // KHR major/minor attributes. Adding CLIENT_VERSION here creates a mixed,
+    // invalid attribute list.
+    if (_this->egl_contextattrib_callback) {
+        // leave attribs empty; callback appends its list below
+    } else
+#endif
     if ((major_version < 3 || (minor_version == 0 && profile_es)) &&
         _this->gl_config.flags == 0 &&
         (profile_mask == 0 || profile_es)) {
@@ -1024,7 +1045,11 @@ SDL_GLContext SDL_EGL_CreateContext(SDL_VideoDevice *_this, EGLSurface egl_surfa
          */
         if (profile_es) {
             attribs[attr++] = EGL_CONTEXT_CLIENT_VERSION;
+#ifdef __ANDROID__
+            attribs[attr++] = 2;
+#else
             attribs[attr++] = SDL_max(major_version, 1);
+#endif
         }
     } else {
 #ifdef EGL_KHR_create_context
@@ -1089,6 +1114,25 @@ SDL_GLContext SDL_EGL_CreateContext(SDL_VideoDevice *_this, EGLSurface egl_surfa
         SDL_free(userAttribs);
     }
 
+#ifdef __ANDROID__
+    // Drop KHR major/minor/profile/flags supplied by the game callback; the
+    // Android EGL wrapper accepts the simple CLIENT_VERSION form instead.
+    {
+        int w = 0;
+        for (int i = 0; i + 1 < attr; i += 2) {
+            EGLint key = attribs[i];
+            if (key == 0x30fb /*EGL_CONTEXT_MAJOR_VERSION_KHR*/ ||
+                key == 0x30fc /*EGL_CONTEXT_MINOR_VERSION_KHR*/ ||
+                key == 0x30fd /*EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR*/ ||
+                key == 0x30fe /*EGL_CONTEXT_FLAGS_KHR*/) {
+                continue;
+            }
+            attribs[w++] = attribs[i];
+            attribs[w++] = attribs[i + 1];
+        }
+        attr = w;
+    }
+#endif
     attribs[attr++] = EGL_NONE;
 
     // Bind the API
@@ -1102,11 +1146,16 @@ SDL_GLContext SDL_EGL_CreateContext(SDL_VideoDevice *_this, EGLSurface egl_surfa
         return NULL;
     }
 
+    /* PCLSDL diagnostic removed */
+    for (int ai = 0; ai < attr; ai += 2) {
+        /* PCLSDL diagnostic removed */
+    }
     egl_context = _this->egl_data->eglCreateContext(_this->egl_data->egl_display,
                                                     _this->egl_data->egl_config,
                                                     share_context, attribs);
 
     if (egl_context == EGL_NO_CONTEXT) {
+        /* PCLSDL diagnostic removed */
         SDL_EGL_SetError("Could not create EGL context", "eglCreateContext");
         return NULL;
     }
